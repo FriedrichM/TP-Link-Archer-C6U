@@ -1,3 +1,4 @@
+import json
 from base64 import b64encode
 from json import loads
 from datetime import timedelta
@@ -87,70 +88,76 @@ class TPLinkEXClient(TPLinkMRClientBase):
 
     def get_status(self) -> Status:
         status = Status()
-        acts = [
-            self.ActItem(self.ActItem.GL, 'DEV2_ADT_LAN', attrs=['MACAddress', 'IPAddress']),
-            self.ActItem(self.ActItem.GL, 'DEV2_ADT_WAN',
-                         attrs=['enable', 'MACAddr', 'connIPv4Address', 'connIPv4Gateway']),
-            self.ActItem(self.ActItem.GL, 'DEV2_ADT_WIFI_COMMON', attrs=['primaryEnable', 'guestEnable']),
-            self.ActItem(self.ActItem.GL, 'DEV2_HOST_ENTRY',
-                         attrs=['active', 'X_TP_LanConnType', 'physAddress', 'IPAddress', 'hostName']),
-            self.ActItem(self.ActItem.GO, 'DEV2_MEM_STATUS', attrs=['total', 'free']),
-            self.ActItem(self.ActItem.GO, 'DEV2_PROC_STATUS', attrs=['CPUUsage']),
-        ]
+        try:
+            acts = [
+                self.ActItem(self.ActItem.GL, 'DEV2_ADT_LAN', attrs=['MACAddress', 'IPAddress']),
+                self.ActItem(self.ActItem.GL, 'DEV2_ADT_WAN',
+                             attrs=['enable', 'MACAddr', 'connIPv4Address', 'connIPv4Gateway']),
+                self.ActItem(self.ActItem.GL, 'DEV2_ADT_WIFI_COMMON', attrs=['primaryEnable', 'guestEnable']),
+                self.ActItem(self.ActItem.GL, 'DEV2_HOST_ENTRY',
+                             attrs=['active', 'X_TP_LanConnType', 'physAddress', 'IPAddress', 'hostName']),
+                self.ActItem(self.ActItem.GO, 'DEV2_MEM_STATUS', attrs=['total', 'free']),
+                self.ActItem(self.ActItem.GO, 'DEV2_PROC_STATUS', attrs=['CPUUsage']),
+            ]
+            self._logger.error("trying acts")
+            _, values = self.req_act(acts)
+            self._logger.debug("Responses: %s", json.dumps(values, indent=2))
 
-        _, values = self.req_act(acts)
+            if values[0].__class__ == list:
+                values[0] = values[0][0]
 
-        if values[0].__class__ == list:
-            values[0] = values[0][0]
+            status._lan_macaddr = EUI48(values[0]['MACAddress'])
+            status._lan_ipv4_addr = IPv4Address(values[0]['IPAddress'])
 
-        status._lan_macaddr = EUI48(values[0]['MACAddress'])
-        status._lan_ipv4_addr = IPv4Address(values[0]['IPAddress'])
+            for item in values[1]:
+                if int(item['enable']) == 0 and values[1].__class__ == list:
+                    continue
+                status._wan_macaddr = EUI48(item['MACAddr']) if item.get('MACAddr') else None
+                status._wan_ipv4_addr = IPv4Address(item['connIPv4Address']) if item.get('connIPv4Address') else None
+                status._wan_ipv4_gateway = IPv4Address(item['connIPv4Gateway']) if item.get('connIPv4Address') else None
 
-        for item in values[1]:
-            if int(item['enable']) == 0 and values[1].__class__ == list:
-                continue
-            status._wan_macaddr = EUI48(item['MACAddr']) if item.get('MACAddr') else None
-            status._wan_ipv4_addr = IPv4Address(item['connIPv4Address']) if item.get('connIPv4Address') else None
-            status._wan_ipv4_gateway = IPv4Address(item['connIPv4Gateway']) if item.get('connIPv4Address') else None
+            if values[2].__class__ != list:
+                status.wifi_2g_enable = bool(int(values[2]['primaryEnable']))
+            else:
+                status.wifi_2g_enable = bool(int(values[2][0]['primaryEnable']))
+                status.wifi_5g_enable = bool(int(values[2][1]['primaryEnable']))
 
-        if values[2].__class__ != list:
-            status.wifi_2g_enable = bool(int(values[2]['primaryEnable']))
-        else:
-            status.wifi_2g_enable = bool(int(values[2][0]['primaryEnable']))
-            status.wifi_5g_enable = bool(int(values[2][1]['primaryEnable']))
+            if values[2].__class__ != list:
+                status.guest_2g_enable = bool(int(values[2]['guestEnable']))
+            else:
+                status.guest_2g_enable = bool(int(values[2][0]['guestEnable']))
+                status.guest_5g_enable = bool(int(values[2][1]['guestEnable']))
 
-        if values[2].__class__ != list:
-            status.guest_2g_enable = bool(int(values[2]['guestEnable']))
-        else:
-            status.guest_2g_enable = bool(int(values[2][0]['guestEnable']))
-            status.guest_5g_enable = bool(int(values[2][1]['guestEnable']))
+            devices = {}
+            for val in self._to_list(values[3]):
+                if int(val['active']) == 0:
+                    continue
+                conn = self.CLIENT_TYPES.get(int(val['X_TP_LanConnType']))
+                if conn is None:
+                    continue
+                elif conn == Connection.WIRED:
+                    status.wired_total += 1
+                elif conn.is_guest_wifi():
+                    status.guest_clients_total += 1
+                elif conn.is_host_wifi():
+                    status.wifi_clients_total += 1
+                devices[val['physAddress']] = Device(conn,
+                                                     EUI48(val['physAddress']),
+                                                     IPv4Address(val['IPAddress']),
+                                                     val['hostName'])
 
-        devices = {}
-        for val in self._to_list(values[3]):
-            if int(val['active']) == 0:
-                continue
-            conn = self.CLIENT_TYPES.get(int(val['X_TP_LanConnType']))
-            if conn is None:
-                continue
-            elif conn == Connection.WIRED:
-                status.wired_total += 1
-            elif conn.is_guest_wifi():
-                status.guest_clients_total += 1
-            elif conn.is_host_wifi():
-                status.wifi_clients_total += 1
-            devices[val['physAddress']] = Device(conn,
-                                                 EUI48(val['physAddress']),
-                                                 IPv4Address(val['IPAddress']),
-                                                 val['hostName'])
+            total = int(values[4]['total'])
+            free = int(values[4]["free"])
+            status.mem_usage = ((total - free) / total)
 
-        total = int(values[4]['total'])
-        free = int(values[4]["free"])
-        status.mem_usage = ((total - free) / total)
+            status.cpu_usage = int(values[5]['CPUUsage']) / 100
 
-        status.cpu_usage = int(values[5]['CPUUsage']) / 100
-
-        status.devices = list(devices.values())
-        status.clients_total = status.wired_total + status.wifi_clients_total + status.guest_clients_total
+            status.devices = list(devices.values())
+            status.clients_total = status.wired_total + status.wifi_clients_total + status.guest_clients_total
+        except Exception as err:
+            self._logger.error("this failed here")
+            self._logger.error(err)
+            raise err
 
         return status
 
