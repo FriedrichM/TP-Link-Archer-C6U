@@ -542,6 +542,7 @@ class TPLinkMRClientBase(AbstractRouter):
         retry = 0
         while retry < self.REQUEST_RETRIES:
             # send the request
+            self._logger.error("retrycount:" + retry)
             if method == 'POST':
                 r = self.req.post(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
             elif method == 'GET':
@@ -554,7 +555,7 @@ class TPLinkMRClientBase(AbstractRouter):
                     and '<title>500 Internal Server Error</title>' not in r.text
                     and '<title>406 Not Acceptable</title>' not in r.text):
                 break
-            self._logger.error("retry:"+retry+ " statucode:"+ r.status_code)
+            self._logger.error("fail:"+retry+ " status_code:"+ r.status_code)
             sleep(0.1)
             retry += 1
 
