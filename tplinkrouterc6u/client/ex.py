@@ -101,7 +101,7 @@ class TPLinkEXClient(TPLinkMRClientBase):
             ]
             self._logger.error("trying acts")
             _, values = self.req_act(acts)
-            self._logger.debug("Responses: %s", json.dumps(values, indent=2))
+            self._logger.error("Responses:" + json.dumps(values, indent=2))
 
             if values[0].__class__ == list:
                 values[0] = values[0][0]
