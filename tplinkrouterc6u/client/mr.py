@@ -1,3 +1,4 @@
+import json
 from hashlib import md5
 from re import search
 from time import time, sleep
@@ -100,7 +101,7 @@ class TPLinkMRClientBase(AbstractRouter):
         Establishes a login session to the host using provided credentials
         '''
         # hash the password
-
+        self._logger.error("mr authorize")
         # request the RSA public key from the host
         self._nn, self._ee, self._seq = self._req_rsa_key()
 
@@ -477,7 +478,7 @@ class TPLinkMRClientBase(AbstractRouter):
             {'JSESSIONID': '4d786fede0164d7613411c7b6ec61e'}
         '''
         # encrypt username + password
-
+        self._logger.error("logging in mr")
         sign, data = self._prepare_data(self.username + '\n' + self.password, True)
         assert len(sign) == 256
 
@@ -491,10 +492,12 @@ class TPLinkMRClientBase(AbstractRouter):
 
         url = self._get_url('cgi/login', data)
         (code, response) = self._request(url)
+        self._logger.error("loginres mr:" + json.dumps(response, indent=2))
         assert code == 200
 
         # parse and match return code
         ret_code = self._parse_ret_val(response)
+        self._logger.error("login ret_code mr:" + str(ret_code))
         error = ''
         if ret_code == self.HTTP_ERR_USER_PWD_NOT_CORRECT:
             info = search('var currAuthTimes=(.*);\nvar currForbidTime=(.*);', response)

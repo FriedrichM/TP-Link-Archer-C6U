@@ -283,7 +283,7 @@ class TPLinkEXClient(TPLinkMRClientBase):
             b64encode(bytes(self.username, "utf-8")).decode("utf-8"),
             b64encode(bytes(self.password, "utf-8")).decode("utf-8")
         )
-
+        self._logger.error("logging in ex")
         sign, data = self._prepare_data(login_data, True)
         assert len(sign) == 256
 
@@ -292,9 +292,10 @@ class TPLinkEXClient(TPLinkMRClientBase):
         url = f"{self.host}/cgi_gdpr?9"
         (code, response) = self._request(url, data_str=request_data)
         response = self._encryption.aes_decrypt(response)
-
+        self._logger.error("loginres ex:" + json.dumps(response, indent=2))
         # parse and match return code
         ret_code = self._parse_ret_val(response)
+        self._logger.error("login ret ex:" + str(ret_code))
         error = ''
         if ret_code == self.HTTP_ERR_USER_PWD_NOT_CORRECT:
             error = ('TplinkRouter - EX - Login failed, wrong user or password. '
