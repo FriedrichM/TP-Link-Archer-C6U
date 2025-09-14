@@ -546,18 +546,22 @@ class TPLinkMRClientBase(AbstractRouter):
         while retry < self.REQUEST_RETRIES:
             # send the request
             self._logger.error("retrycount:" + str(retry))
-            if method == 'POST':
-                r = self.req.post(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
-            elif method == 'GET':
-                r = self.req.get(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
-            else:
-                raise Exception('Unsupported method ' + str(method))
+            try:
+                if method == 'POST':
+                    r = self.req.post(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
+                elif method == 'GET':
+                    r = self.req.get(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
+                else:
+                    raise Exception('Unsupported method ' + str(method))
 
-            # sometimes we get 500 here, not sure why... just retry the request
-            if (r.status_code not in [500, 406]
-                    and '<title>500 Internal Server Error</title>' not in r.text
-                    and '<title>406 Not Acceptable</title>' not in r.text):
-                break
+                # sometimes we get 500 here, not sure why... just retry the request
+                if (r.status_code not in [500, 406]
+                        and '<title>500 Internal Server Error</title>' not in r.text
+                        and '<title>406 Not Acceptable</title>' not in r.text):
+                    break
+            except Exception as e:
+                self._logger.error("mr request failed:")
+                self._logger.error(e)
             self._logger.error("fail:"+str(retry)+ " status_code:"+ str(r.status_code))
             sleep(0.1)
             retry += 1
