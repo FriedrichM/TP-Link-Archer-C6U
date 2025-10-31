@@ -9,7 +9,7 @@ from Crypto.Util.number import bytes_to_long, long_to_bytes
 from Crypto.Util.Padding import pad, unpad
 from time import time
 from random import randint
-
+from Crypto.Random import get_random_bytes
 
 class EncryptionWrapper:
     def __init__(self) -> None:
@@ -85,52 +85,41 @@ class EncryptionWrapper:
 
 class EncryptionWrapperMR:
     RSA_USE_PKCS_V1_5 = False
-    AES_KEY_LEN = 128 // 8
-    AES_IV_LEN = 16
+    AES_KEY_LEN = 16  # 128-bit AES
+    AES_IV_LEN = 12  # GCM uses 96-bit IV, not 16!
 
-    def __init__(self) -> None:
-        ts = str(round(time() * 1000))
+    def __init__(self):
+        self.key_bytes = get_random_bytes(self.AES_KEY_LEN)
+        self.iv_bytes = get_random_bytes(self.AES_IV_LEN)
 
-        key = (ts + str(randint(100000000, 1000000000 - 1)))[:self.AES_KEY_LEN]
-        iv = (ts + str(randint(100000000, 1000000000 - 1)))[:self.AES_IV_LEN]
+        self.key = b64encode(self.key_bytes).decode()
+        self.iv = b64encode(self.iv_bytes).decode()
 
-        assert len(key) == self.AES_KEY_LEN
-        assert len(iv) == self.AES_IV_LEN
+    def aes_encrypt(self, raw: str) -> tuple[str, str]:
+        cipher = AES.new(self.key_bytes, AES.MODE_GCM, nonce=self.iv_bytes)
+        ciphertext, tag = cipher.encrypt_and_digest(raw.encode('utf-8'))
+        return (
+            b64encode(ciphertext).decode(),  # router expects b64 ciphertext
+            b64encode(tag).decode()  # router expects b64 tag
+        )
 
-        self._key = key
-        self._iv = iv
-
-    def aes_encrypt(self, raw: str) -> str:
-        # pad to a multiple of 16 with pkcs7
-        data_padded = pad(raw.encode('utf8'), 16, 'pkcs7')
-
-        # encrypt the body
-        aes_encryptor = self._make_aes_cipher()
-        encrypted_data_bytes = aes_encryptor.encrypt(data_padded)
-
-        # encode encrypted binary data to base64
-        return b64encode(encrypted_data_bytes).decode('utf8')
-
-    def aes_decrypt(self, data: str):
-        # decode base64 string
-        encrypted_response_data = b64decode(data)
-
-        # decrypt the response using our AES key
-        aes_decryptor = self._make_aes_cipher()
-        response = aes_decryptor.decrypt(encrypted_response_data)
-
-        # unpad using pkcs7
-        return unpad(response, 16, 'pkcs7').decode('utf8')
+    def aes_decrypt(self, combined_b64: str):
+        # split into ciphertext_b64 and tag_b64 at the FIRST '=' only
+        tag_b64 = combined_b64[-24:]  # last 24 characters
+        ciphertext_b64 = combined_b64[:-24]
+        ciphertext = b64decode(ciphertext_b64)
+        tag = b64decode(tag_b64)
+        cipher = AES.new(self.key_bytes, AES.MODE_GCM, nonce=self.iv_bytes)
+        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+        return plaintext.decode('utf8')
 
     def get_signature(self, seq: int, is_login: bool, hash: str, nn: str, ee: str) -> str:
         if is_login:
             # on login we also send our AES key, which is subsequently
             # used for E2E encrypted communication
-
-            sign_data = 'key={}&iv={}&h={}&s={}'.format(self._key, self._iv, hash, seq)
+            sign_data = f"key={self.key}&iv={self.iv}&h={hash}&s={seq}"
         else:
-            sign_data = 'h={}&s={}'.format(hash, seq)
-
+            sign_data = f"h={hash}&s={seq}"
         # set step based on whether PKCS padding is used
         rsa_byte_len = len(nn) // 2  # hexlen / 2 * 8 / 8
         step = (rsa_byte_len - 11) if self.RSA_USE_PKCS_V1_5 else rsa_byte_len

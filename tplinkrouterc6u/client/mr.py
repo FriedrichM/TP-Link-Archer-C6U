@@ -478,7 +478,6 @@ class TPLinkMRClientBase(AbstractRouter):
             {'JSESSIONID': '4d786fede0164d7613411c7b6ec61e'}
         '''
         # encrypt username + password
-        self._logger.error("logging in mr")
         sign, data = self._prepare_data(self.username + '\n' + self.password, True)
         assert len(sign) == 256
 
@@ -490,14 +489,12 @@ class TPLinkMRClientBase(AbstractRouter):
             'isMobile': 0
         }
 
-        url = self._get_url('cgi/login', data)
-        (code, response) = self._request(url)
-        self._logger.error("loginres mr:" + json.dumps(response, indent=2))
+        url = self._get_url('cgi/login')
+        (code, response) = self._request(url, )
         assert code == 200
 
         # parse and match return code
         ret_code = self._parse_ret_val(response)
-        self._logger.error("login ret_code mr:" + str(ret_code))
         error = ''
         if ret_code == self.HTTP_ERR_USER_PWD_NOT_CORRECT:
             info = search('var currAuthTimes=(.*);\nvar currForbidTime=(.*);', response)
@@ -537,33 +534,26 @@ class TPLinkMRClientBase(AbstractRouter):
 
         # encrypt request data if needed (for the /cgi_gdpr endpoint)
         if encrypt:
-            sign, data = self._prepare_data(data_str, is_login)
-            data = 'sign={}\r\ndata={}\r\n'.format(sign, data)
+            sign, data ,tag = self._prepare_data(data_str, is_login)
+            data = 'sign={}\r\ndata={}\r\ntag={}\r\n'.format(sign, data, tag)
         else:
             data = data_str
 
         retry = 0
         while retry < self.REQUEST_RETRIES:
             # send the request
-            self._logger.error("retrycount:" + str(retry))
-            try:
-                if method == 'POST':
-                    r = self.req.post(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
-                elif method == 'GET':
-                    r = self.req.get(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
-                else:
-                    raise Exception('Unsupported method ' + str(method))
+            if method == 'POST':
+                 r = self.req.post(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
+            elif method == 'GET':
+                r = self.req.get(url, data=data, headers=headers, timeout=self.timeout, verify=self._verify_ssl)
+            else:
+                raise Exception('Unsupported method ' + str(method))
 
-                # sometimes we get 500 here, not sure why... just retry the request
-                if (r.status_code not in [500, 406]
-                        and '<title>500 Internal Server Error</title>' not in r.text
-                        and '<title>406 Not Acceptable</title>' not in r.text):
-                    break
-            except Exception as e:
-                self._logger.error("mr request failed:")
-                self._logger.error(e)
-            self._logger.error("fail:"+str(retry)+ " status_code:"+ str(r.status_code))
-            sleep(0.1)
+            # sometimes we get 500 here, not sure why... just retry the request
+            if r.status_code != 500 and '<title>500 Internal Server Error</title>' not in r.text:
+                break
+
+            sleep(0.05)
             retry += 1
 
         # decrypt the response, if needed
@@ -586,13 +576,13 @@ class TPLinkMRClientBase(AbstractRouter):
         return int(result.group(1))
 
     def _prepare_data(self, data: str, is_login: bool) -> tuple[str, str]:
-        encrypted_data = self._encryption.aes_encrypt(data)
+        encrypted_data, tag = self._encryption.aes_encrypt(data)
         data_len = len(encrypted_data)
         # get encrypted signature
         signature = self._encryption.get_signature(int(self._seq) + data_len, is_login, self._hash, self._nn, self._ee)
 
         # format expected raw request data
-        return signature, encrypted_data
+        return signature, encrypted_data, tag
 
 
 class TPLinkMRClient(TPLinkMRClientBase):
