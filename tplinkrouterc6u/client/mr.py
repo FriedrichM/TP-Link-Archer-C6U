@@ -489,8 +489,8 @@ class TPLinkMRClientBase(AbstractRouter):
             'isMobile': 0
         }
 
-        url = self._get_url('cgi/login')
-        (code, response) = self._request(url, )
+        url = self._get_url('cgi/login', data)
+        (code, response) = self._request(url)
         assert code == 200
 
         # parse and match return code
